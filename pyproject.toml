@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rmcpp"
+version = "0.1.0"
+description = "Reliable Model Context Protocol Proxy - A robust proxy server for managing model context protocol and streaming responses"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "msl2246", email = "msl2246@gmail.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "mcp>=0.1.0",
+    "uvicorn>=0.23.0",
+    "starlette>=0.31.0",
+    "httpx>=0.24.0",
+    "httpcore>=0.18.0",
+    "asyncio>=3.4.3",
+    "typing-extensions>=4.7.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/msl2246/rmcpp"
+
+[project.scripts]
+rmcpp = "rmcpp.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rmcpp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "rmcpp",
+    "README.md"
+]
