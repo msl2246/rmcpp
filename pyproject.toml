@@ -7,7 +7,7 @@ name = "rmcpp"
 version = "0.1.0"
 description = "Reliable Model Context Protocol Proxy - A robust proxy server for managing model context protocol and streaming responses"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "msl2246", email = "msl2246@gmail.com" }

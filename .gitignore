@@ -1,0 +1,11 @@
+# Ignore mcp_server_fetch
+mcp_server_fetch/
+
+# Ignore Python virtual environment
+venv/
+
+# Ignore Python cache directories anywhere in the project
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class

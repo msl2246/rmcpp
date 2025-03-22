@@ -14,7 +14,7 @@ def start_server():
     try:
         # Start the fetch server in a separate process
         process = subprocess.Popen(
-            [sys.executable, "simple_test.py"],
+            [sys.executable, os.path.join(os.path.dirname(__file__), "simple_test.py")],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
@@ -34,8 +34,11 @@ def start_rmcpp_proxy():
         time.sleep(3)
         
         # Start RMCPP with the fetch server
+        # Updated to use the new package structure
         rmcpp_process = subprocess.Popen(
-            [sys.executable, "-m", "rmcpp", sys.executable, "simple_test.py", "--sse-port", "8080"],
+            [sys.executable, "-m", "rmcpp.main", sys.executable, 
+             os.path.join(os.path.dirname(__file__), "simple_test.py"), 
+             "--sse-port", "8080"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True

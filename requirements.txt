@@ -1,0 +1,6 @@
+mcp>=0.1.0
+uvicorn>=0.23.0
+starlette>=0.31.0
+httpx>=0.24.0
+httpcore>=0.18.0
+asyncio>=3.4.3
