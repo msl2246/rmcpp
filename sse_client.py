@@ -8,7 +8,7 @@ from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.server.stdio import stdio_server
 
-from .proxy_server import create_proxy_server
+from proxy_server import create_proxy_server
 
 logger = logging.getLogger(__name__)
 

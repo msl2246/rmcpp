@@ -15,8 +15,8 @@ import typing as t
 
 from mcp.client.stdio import StdioServerParameters
 
-from .sse_client import run_sse_client
-from .sse_server import SseServerSettings, run_sse_server
+from sse_client import run_sse_client
+from sse_server import SseServerSettings, run_sse_server
 
 
 def setup_logging(level: str = "INFO") -> None:
