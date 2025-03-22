@@ -34,13 +34,14 @@ dependencies = [
 "Homepage" = "https://github.com/msl2246/rmcpp"
 
 [project.scripts]
-rmcpp = "rmcpp.main:main"
+rmcpp = "main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["rmcpp"]
+packages = ["."]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "rmcpp",
+    "*.py",
+    "tests",
     "README.md"
 ]
