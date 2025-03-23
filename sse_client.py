@@ -108,9 +108,9 @@ class CapabilityAwareClientSession(ClientSession):
             # Prepare request data
             request_data = {
                 "jsonrpc": "2.0",
-                "id": self._next_request_id(),  # Assuming this method exists in parent
+                "id": self._next_request_id(),
                 "method": method_name,
-                "params": args if args else kwargs
+                "params": kwargs if kwargs else (args[0] if args else {})
             }
             
             # Send request
