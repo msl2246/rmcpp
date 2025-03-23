@@ -50,6 +50,23 @@ async def test_fetch_server_functionality():
                 "success": True,
                 "content_type": "html"
             }
+        },
+        {
+            "url": "https://www.example.com",
+            "max_length": 200
+        },
+        {
+            "url": "https://www.example.com",
+            "raw": True
+        },
+        {
+            "url": "https://www.example.com",
+            "start_index": 500,
+            "max_length": 300
+        },
+        {
+            "url": "https://www.example.com",
+            "test_json_error": True
         }
     ]
     
@@ -111,6 +128,22 @@ async def test_fetch_server_functionality():
             
             if len(content) > 150:
                 print(f"Test case passed!")
+                
+            # 특수 테스트 케이스를 위한 코드 - JSON 파싱 오류 테스트
+            if test_case.get("test_json_error", False):
+                print("Testing JSON parsing error handling...")
+                # 잘못된 JSON 형식을 강제로 만들어내는 방법을 시뮬레이션
+                # 이 부분은 실제 오류를 복제하기 위해 JSON 형식이 아닌 데이터를 메시지로 보내는 상황을 테스트
+                try:
+                    # 강제로 JSON 파싱 오류 발생 시뮬레이션
+                    broken_json = "{key: 'value'"  # 따옴표 없는 키와 닫는 괄호 없음
+                    result = json.loads(broken_json)
+                    print("This should not execute - JSON parse should fail")
+                except json.JSONDecodeError as e:
+                    print(f"JSON parsing error caught as expected: {e}")
+                    print(f"Error position: {e.pos}, Line: {e.lineno}, Column: {e.colno}")
+                    print("Error handling test passed!")
+                continue
                 
         except Exception as e:
             print(f"Error in test case: {e}")

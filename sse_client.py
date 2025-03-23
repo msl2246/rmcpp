@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import json
 from typing import Any, Dict, Optional, Set
 
 from mcp.client.session import ClientSession
@@ -41,6 +42,40 @@ class CapabilityAwareClientSession(ClientSession):
         if len(args) >= 2:
             self.read_stream = args[0]
             self.write_stream = args[1]
+            
+            # Patch the read stream to handle JSON parsing errors
+            self._patch_read_stream()
+    
+    def _patch_read_stream(self):
+        """Enhance read_stream to better handle malformed JSON."""
+        if not hasattr(self.read_stream, 'original_read'):
+            # Store original read method
+            self.read_stream.original_read = self.read_stream.read
+            
+            # Create new enhanced read method
+            async def enhanced_read():
+                try:
+                    result = await self.read_stream.original_read()
+                    logger.debug(f"Received response: {result}")
+                    return result
+                except Exception as e:
+                    error_message = str(e)
+                    if "Unexpected non-whitespace character" in error_message or "JSON" in error_message:
+                        logger.error(f"JSON parsing error in read_stream.read(): {e}")
+                        logger.error(f"Error context: {e.__class__.__name__}, Location: {getattr(e, 'pos', 'Unknown')}")
+                        # Return an error object instead of failing
+                        return {
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32700,
+                                "message": f"JSON parsing error: {error_message}"
+                            },
+                            "id": self._request_id
+                        }
+                    raise
+            
+            # Replace read method with enhanced version
+            self.read_stream.read = enhanced_read
     
     def _next_request_id(self) -> int:
         """Generate the next request ID.
@@ -116,8 +151,16 @@ class CapabilityAwareClientSession(ClientSession):
             # Send request
             await write_stream.write(request_data)
             
-            # Wait for response
-            response = await read_stream.read()
+            # Wait for response with enhanced error handling
+            try:
+                response = await read_stream.read()
+                # Validate that response is properly formatted
+                if not isinstance(response, dict):
+                    logger.error(f"Invalid response format: {response}")
+                    return ErrorResponse(code=-32700, message=f"Invalid response format: not a JSON object")
+            except Exception as json_error:
+                logger.error(f"JSON parsing error: {json_error}")
+                return ErrorResponse(code=-32700, message=f"JSON parsing error: {str(json_error)}")
             
             # Handle response
             if "error" in response:

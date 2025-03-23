@@ -56,16 +56,32 @@ def create_starlette_app(
                         try:
                             message = await original_receive()
                             logger.debug(f"Received message: {message}")
+                            
+                            # Validate message format (additional validation)
+                            if not isinstance(message, dict):
+                                logger.error(f"Invalid message format received: {message}")
+                                return {
+                                    "jsonrpc": "2.0",
+                                    "error": {
+                                        "code": -32700,
+                                        "message": f"Invalid message format: not a JSON object"
+                                    },
+                                    "id": None
+                                }
+                            
                             return message
                         except Exception as e:
-                            if "Unexpected non-whitespace character" in str(e) or "JSON" in str(e):
+                            error_message = str(e)
+                            if "Unexpected non-whitespace character" in error_message or "JSON" in error_message:
                                 logger.error(f"JSON parsing error in received message: {e}")
+                                # Log more details about the error context
+                                logger.error(f"Error context: {e.__class__.__name__}, Location: {getattr(e, 'pos', 'Unknown')}")
                                 # Return an error notification instead of failing
                                 return {
                                     "jsonrpc": "2.0",
                                     "error": {
                                         "code": -32700,
-                                        "message": f"JSON parsing error: {str(e)}"
+                                        "message": f"JSON parsing error: {error_message}"
                                     },
                                     "id": None
                                 }

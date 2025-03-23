@@ -50,12 +50,28 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                 try:
                     return await handler_fn(req)
                 except Exception as e:
+                    error_message = str(e)
                     logger.error(f"Error in handler: {e}")
-                    if "Unexpected non-whitespace character" in str(e) or "JSON" in str(e):
-                        logger.error(f"JSON parsing error: {e}")
+                    
+                    # Enhanced JSON parsing error detection and handling
+                    if ("Unexpected non-whitespace character" in error_message or 
+                        "JSON" in error_message or 
+                        "SyntaxError" in error_message):
+                        logger.error(f"JSON parsing error details: {e.__class__.__name__}, Message: {error_message}")
+                        
+                        # Try to extract position information if available
+                        pos_info = ""
+                        if hasattr(e, 'pos'):
+                            pos_info = f" at position {e.pos}"
+                        elif hasattr(e, 'doc') and hasattr(e, 'pos'):
+                            pos_info = f" at position {e.pos} in document"
+                        
                         # Return a proper error response for JSON parsing errors
                         return types.ServerResult(
-                            types.ErrorResponse(code=-32700, message=f"JSON parsing error: {str(e)}")
+                            types.ErrorResponse(
+                                code=-32700, 
+                                message=f"JSON parsing error{pos_info}: {error_message}"
+                            )
                         )
                     # Re-raise all other exceptions
                     raise
