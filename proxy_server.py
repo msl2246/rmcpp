@@ -80,6 +80,19 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                             # 오류 위치 표시
                             pos_marker = ' ' * (min(20, pos) - context_start) + '^'
                             logger.error(f"Error position: {pos_marker}")
+                            
+                            # 복구 시도: 여러 JSON 객체가 연속된 경우
+                            if pos > 0 and e.doc[:pos].strip().endswith('}'):
+                                try:
+                                    # 첫 번째 유효한 JSON 객체 추출 시도
+                                    valid_json = e.doc[:pos].strip()
+                                    logger.info(f"Attempting to recover JSON: {valid_json}")
+                                    parsed_data = json.loads(valid_json)
+                                    logger.info(f"Successfully recovered JSON object")
+                                    # 복구된 데이터로 요청 처리 재시도
+                                    return await handler_fn(req)
+                                except Exception as recovery_error:
+                                    logger.error(f"Failed to recover: {recovery_error}")
                         
                         # 위치 정보 추출
                         pos_info = ""

@@ -51,75 +51,170 @@ class CapabilityAwareClientSession(ClientSession):
     
     def _patch_read_stream(self):
         """Enhance read_stream to better handle malformed JSON."""
-        if not hasattr(self.read_stream, 'original_read'):
-            # Store original read method
-            self.read_stream.original_read = self.read_stream.read
-            
-            # Create new enhanced read method
-            async def enhanced_read():
-                try:
-                    result = await self.read_stream.original_read()
-                    logger.debug(f"Received response: {result}")
+        # 스트림 타입 확인
+        stream_type = type(self.read_stream).__name__
+        logger.debug(f"Detected stream type: {stream_type}")
+        
+        # MemoryObjectReceiveStream의 경우 receive 메서드를 사용
+        if stream_type == 'MemoryObjectReceiveStream':
+            logger.debug("Using receive method for MemoryObjectReceiveStream")
+            if not hasattr(self.read_stream, 'original_receive'):
+                # 원본 receive 메서드 저장
+                self.read_stream.original_receive = self.read_stream.receive
+                
+                # 향상된 receive 메서드 생성
+                async def enhanced_receive():
+                    try:
+                        result = await self.read_stream.original_receive()
+                        logger.debug(f"Received response via receive(): {result}")
+                        
+                        # 응답이 문자열인 경우 JSON 파싱 시도
+                        if isinstance(result, str):
+                            try:
+                                # 여러 JSON 객체가 있는지 확인
+                                result_str = result.strip()
+                                if result_str.startswith('{') and '}' in result_str:
+                                    end_pos = result_str.find('}') + 1
+                                    valid_json = result_str[:end_pos]
+                                    logger.debug(f"Extracting first JSON object: {valid_json}")
+                                    result = json.loads(valid_json)
+                                else:
+                                    result = json.loads(result_str)
+                            except json.JSONDecodeError as je:
+                                logger.error(f"JSON decode error in receive: {je}")
+                                return {
+                                    "jsonrpc": "2.0",
+                                    "error": {
+                                        "code": -32700,
+                                        "message": f"JSON parsing error: {str(je)}"
+                                    },
+                                    "id": self._request_id
+                                }
+                        
+                        return result
+                    except Exception as e:
+                        logger.error(f"Error in enhanced_receive: {e}")
+                        raise
+                
+                # receive 메서드를 향상된 버전으로 교체
+                self.read_stream.receive = enhanced_receive
+                
+                # read 메서드를 추가하여 호환성 유지
+                async def read_wrapper():
+                    return await self.read_stream.receive()
+                
+                self.read_stream.read = read_wrapper
+                self.read_stream.original_read = read_wrapper
+                
+        # 다른 스트림 타입(일반적으로 TestReadStream 등)은 read 메서드를 사용
+        elif hasattr(self.read_stream, 'read'):
+            logger.debug(f"Using read method for {stream_type}")
+            if not hasattr(self.read_stream, 'original_read'):
+                # 원본 read 메서드 저장
+                self.read_stream.original_read = self.read_stream.read
+                
+                # 향상된 read 메서드 생성
+                async def enhanced_read():
+                    try:
+                        result = await self.read_stream.original_read()
+                        logger.debug(f"Received response via read(): {result}")
 
-                    # 추가 검증: result가 유효한 dict인지 확인
-                    if not isinstance(result, dict):
-                        logger.error(f"Invalid response format (not a dict): {type(result)}")
-                        error_msg = f"Invalid response format: {type(result).__name__}, expected dict"
+                        # 문자열인 경우 JSON 파싱 시도
+                        if isinstance(result, str):
+                            try:
+                                # 여러 JSON 객체가 있는지 확인
+                                result_str = result.strip()
+                                # 첫 번째 유효한 JSON 객체만 추출
+                                if result_str.startswith('{') and '}' in result_str:
+                                    end_pos = result_str.find('}') + 1
+                                    valid_json = result_str[:end_pos]
+                                    logger.debug(f"Extracting first JSON object: {valid_json}")
+                                    result = json.loads(valid_json)
+                                else:
+                                    result = json.loads(result_str)
+                            except json.JSONDecodeError as je:
+                                logger.error(f"Failed to parse JSON string: {je}")
+                                # 기존 오류 처리 로직으로 넘어감
+                                raise
+
+                        # 추가 검증: result가 유효한 dict인지 확인
+                        if not isinstance(result, dict):
+                            logger.error(f"Invalid response format (not a dict): {type(result)}")
+                            error_msg = f"Invalid response format: {type(result).__name__}, expected dict"
+                            return {
+                                "jsonrpc": "2.0",
+                                "error": {
+                                    "code": -32700,
+                                    "message": error_msg
+                                },
+                                "id": self._request_id
+                            }
+                        
+                        # 추가 검증: 필수 필드가 있는지 확인
+                        if "jsonrpc" not in result:
+                            logger.warning(f"Response missing 'jsonrpc' field: {result}")
+                            # 여전히 응답을 처리할 수 있으므로 경고만 기록
+                        
+                        return result
+                    except json.JSONDecodeError as je:
+                        error_message = str(je)
+                        logger.error(f"JSON decode error in read_stream.read(): {je}")
+                        logger.error(f"Error position: {je.pos}, line {je.lineno}, column {je.colno}")
+                        
+                        # 문서 컨텍스트 로깅 시 추가 검증
+                        if hasattr(je, 'doc') and je.doc:
+                            context_start = max(0, je.pos - 10)
+                            context_end = min(len(je.doc), je.pos + 10)
+                            logger.error(f"Document context: '{je.doc[context_start:context_end]}'")
+                            
+                            # 여러 JSON 객체가 연속된 경우 첫 번째 객체만 추출 시도
+                            if je.pos > 0 and je.doc[:je.pos].strip().endswith('}'):
+                                try:
+                                    # 첫 번째 유효한 JSON 객체 추출 시도
+                                    valid_json = je.doc[:je.pos].strip()
+                                    logger.info(f"Attempting to recover first JSON object: {valid_json}")
+                                    parsed_result = json.loads(valid_json)
+                                    logger.info(f"Successfully recovered JSON object")
+                                    return parsed_result
+                                except json.JSONDecodeError:
+                                    logger.error("Failed to recover first JSON object")
+                        
+                        # 상세한 오류 정보를 포함한 응답 반환
                         return {
                             "jsonrpc": "2.0",
                             "error": {
                                 "code": -32700,
-                                "message": error_msg
+                                "message": f"JSON parsing error at position {je.pos}: {error_message}"
                             },
                             "id": self._request_id
                         }
-                    
-                    # 추가 검증: 필수 필드가 있는지 확인
-                    if "jsonrpc" not in result:
-                        logger.warning(f"Response missing 'jsonrpc' field: {result}")
-                        # 여전히 응답을 처리할 수 있으므로 경고만 기록
-                    
-                    return result
-                except json.JSONDecodeError as je:
-                    error_message = str(je)
-                    logger.error(f"JSON decode error in read_stream.read(): {je}")
-                    logger.error(f"Error position: {je.pos}, line {je.lineno}, column {je.colno}")
-                    logger.error(f"Document context: '{je.doc[max(0, je.pos-10):je.pos+10]}'")
-                    
-                    # 상세한 오류 정보를 포함한 응답 반환
-                    return {
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32700,
-                            "message": f"JSON parsing error at position {je.pos}: {error_message}"
-                        },
-                        "id": self._request_id
-                    }
-                except Exception as e:
-                    error_message = str(e)
-                    logger.error(f"Error in read_stream.read(): {e}")
-                    
-                    if "Unexpected non-whitespace character" in error_message or "JSON" in error_message:
-                        logger.error(f"JSON parsing error in read_stream.read(): {e}")
-                        logger.error(f"Error context: {e.__class__.__name__}, Location: {getattr(e, 'pos', 'Unknown')}")
+                    except Exception as e:
+                        error_message = str(e)
+                        logger.error(f"Error in read_stream.read(): {e}")
                         
-                        # 오류 메시지에서 위치 정보 추출 시도
-                        position_match = re.search(r'at position (\d+)', error_message)
-                        position = position_match.group(1) if position_match else "unknown"
-                        
-                        # Return an error object instead of failing
-                        return {
-                            "jsonrpc": "2.0",
-                            "error": {
-                                "code": -32700,
-                                "message": f"JSON parsing error at position {position}: {error_message}"
-                            },
-                            "id": self._request_id
-                        }
-                    raise
-            
-            # Replace read method with enhanced version
-            self.read_stream.read = enhanced_read
+                        if "Unexpected non-whitespace character" in error_message or "JSON" in error_message:
+                            logger.error(f"JSON parsing error in read_stream.read(): {e}")
+                            logger.error(f"Error context: {e.__class__.__name__}, Location: {getattr(e, 'pos', 'Unknown')}")
+                            
+                            # 오류 메시지에서 위치 정보 추출 시도
+                            position_match = re.search(r'at position (\d+)', error_message)
+                            position = position_match.group(1) if position_match else "unknown"
+                            
+                            # Return an error object instead of failing
+                            return {
+                                "jsonrpc": "2.0",
+                                "error": {
+                                    "code": -32700,
+                                    "message": f"JSON parsing error at position {position}: {error_message}"
+                                },
+                                "id": self._request_id
+                            }
+                        raise
+                
+                # read 메서드를 향상된 버전으로 교체
+                self.read_stream.read = enhanced_read
+        else:
+            logger.warning(f"Unknown stream type: {stream_type}, skipping enhancement")
     
     def _next_request_id(self) -> int:
         """Generate the next request ID.
@@ -198,6 +293,61 @@ class CapabilityAwareClientSession(ClientSession):
             # Wait for response with enhanced error handling
             try:
                 response = await read_stream.read()
+                
+                # 문자열 응답 처리 (특히 TestReadStream에서 오는 경우)
+                if isinstance(response, str):
+                    try:
+                        # 여러 JSON 객체가 있는지 확인
+                        if response.startswith('{') and '}' in response:
+                            # 첫 번째 유효한 JSON 객체를 추출
+                            first_close_brace = response.find('}') + 1
+                            valid_json = response[:first_close_brace]
+                            
+                            # 유효한 JSON이 완전한 객체인지 확인
+                            obj_depth = 0
+                            in_string = False
+                            escape_next = False
+                            actual_end = 0
+                            
+                            for i, c in enumerate(response):
+                                if escape_next:
+                                    escape_next = False
+                                    continue
+                                
+                                if c == '\\' and in_string:
+                                    escape_next = True
+                                    continue
+                                
+                                if c == '"' and not escape_next:
+                                    in_string = not in_string
+                                
+                                if not in_string:
+                                    if c == '{':
+                                        obj_depth += 1
+                                    elif c == '}':
+                                        obj_depth -= 1
+                                        if obj_depth == 0:
+                                            actual_end = i + 1
+                                            break
+                            
+                            if actual_end > 0:
+                                valid_json = response[:actual_end]
+                            
+                            logger.debug(f"Extracting JSON object: {valid_json}")
+                            
+                            try:
+                                parsed_resp = json.loads(valid_json)
+                                logger.debug(f"Successfully parsed first JSON object: {parsed_resp}")
+                                response = parsed_resp
+                            except json.JSONDecodeError as je:
+                                logger.error(f"Failed to parse extracted JSON: {je}")
+                                raise
+                        else:
+                            response = json.loads(response)
+                    except json.JSONDecodeError as je:
+                        logger.error(f"Failed to parse response string: {je}")
+                        return ErrorResponse(code=-32700, message=f"JSON parsing error: {str(je)}")
+                
                 # Validate that response is properly formatted
                 if not isinstance(response, dict):
                     logger.error(f"Invalid response format: {response}")

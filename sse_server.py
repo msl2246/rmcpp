@@ -59,6 +59,24 @@ def create_starlette_app(
                             message = await original_receive()
                             logger.debug(f"Received message: {message}")
                             
+                            # 문자열인 경우 JSON 파싱 시도
+                            if isinstance(message, str):
+                                try:
+                                    # 여러 JSON 객체가 있는지 확인
+                                    message_str = message.strip()
+                                    # 첫 번째 유효한 JSON 객체만 추출
+                                    if message_str.startswith('{') and '}' in message_str:
+                                        end_pos = message_str.find('}') + 1
+                                        valid_json = message_str[:end_pos]
+                                        logger.debug(f"Extracting first JSON object: {valid_json}")
+                                        message = json.loads(valid_json)
+                                    else:
+                                        message = json.loads(message_str)
+                                except json.JSONDecodeError as je:
+                                    logger.error(f"Failed to parse JSON string: {je}")
+                                    # 기존 오류 처리 로직으로 이동
+                                    raise
+                            
                             # Validate message format (additional validation)
                             if not isinstance(message, dict):
                                 logger.error(f"Invalid message format received: {type(message).__name__}")
@@ -82,11 +100,24 @@ def create_starlette_app(
                             error_message = str(je)
                             logger.error(f"JSON decode error in received message: {je}")
                             logger.error(f"Error position: {je.pos}, line {je.lineno}, column {je.colno}")
-                            # 가능하면 문제가 있는 문서의 컨텍스트 로깅
-                            if hasattr(je, 'doc'):
+                            
+                            # 문서 컨텍스트 로깅 및 복구 시도
+                            if hasattr(je, 'doc') and je.doc:
                                 context_start = max(0, je.pos - 10)
                                 context_end = min(len(je.doc), je.pos + 10)
                                 logger.error(f"Document context: '{je.doc[context_start:context_end]}'")
+                                
+                                # 여러 JSON 객체가 연속된 경우 첫 번째 객체만 추출 시도
+                                if je.pos > 0 and je.doc[:je.pos].strip().endswith('}'):
+                                    try:
+                                        # 첫 번째 유효한 JSON 객체 추출 시도
+                                        valid_json = je.doc[:je.pos].strip()
+                                        logger.info(f"Attempting to recover first JSON object: {valid_json}")
+                                        parsed_message = json.loads(valid_json)
+                                        logger.info(f"Successfully recovered JSON object")
+                                        return parsed_message
+                                    except json.JSONDecodeError:
+                                        logger.error("Failed to recover first JSON object")
                             
                             # JSON 오류 응답 반환
                             return {
