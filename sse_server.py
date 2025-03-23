@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import json
+import re
 from dataclasses import dataclass
 from typing import Literal, List, Optional
 
@@ -59,36 +61,85 @@ def create_starlette_app(
                             
                             # Validate message format (additional validation)
                             if not isinstance(message, dict):
-                                logger.error(f"Invalid message format received: {message}")
+                                logger.error(f"Invalid message format received: {type(message).__name__}")
                                 return {
                                     "jsonrpc": "2.0",
                                     "error": {
                                         "code": -32700,
-                                        "message": f"Invalid message format: not a JSON object"
+                                        "message": f"Invalid message format: {type(message).__name__}, expected dict"
                                     },
                                     "id": None
                                 }
                             
+                            # 필수 필드 검증
+                            if "jsonrpc" not in message:
+                                logger.warning(f"Message missing 'jsonrpc' field: {message}")
+                                # 경고만 기록하고 계속 진행
+                            
                             return message
+                        except json.JSONDecodeError as je:
+                            # 상세한 JSON 디코드 오류 처리
+                            error_message = str(je)
+                            logger.error(f"JSON decode error in received message: {je}")
+                            logger.error(f"Error position: {je.pos}, line {je.lineno}, column {je.colno}")
+                            # 가능하면 문제가 있는 문서의 컨텍스트 로깅
+                            if hasattr(je, 'doc'):
+                                context_start = max(0, je.pos - 10)
+                                context_end = min(len(je.doc), je.pos + 10)
+                                logger.error(f"Document context: '{je.doc[context_start:context_end]}'")
+                            
+                            # JSON 오류 응답 반환
+                            return {
+                                "jsonrpc": "2.0",
+                                "error": {
+                                    "code": -32700,
+                                    "message": f"JSON parsing error at position {je.pos}: {error_message}"
+                                },
+                                "id": None
+                            }
                         except Exception as e:
                             error_message = str(e)
                             if "Unexpected non-whitespace character" in error_message or "JSON" in error_message:
                                 logger.error(f"JSON parsing error in received message: {e}")
                                 # Log more details about the error context
                                 logger.error(f"Error context: {e.__class__.__name__}, Location: {getattr(e, 'pos', 'Unknown')}")
+                                
+                                # 오류 메시지에서 위치 정보 추출
+                                position_match = re.search(r'at position (\d+)', error_message)
+                                position = position_match.group(1) if position_match else "unknown"
+                                
                                 # Return an error notification instead of failing
                                 return {
                                     "jsonrpc": "2.0",
                                     "error": {
                                         "code": -32700,
-                                        "message": f"JSON parsing error: {error_message}"
+                                        "message": f"JSON parsing error at position {position}: {error_message}"
                                     },
                                     "id": None
                                 }
+                            
+                            # 다른 예외 로깅 개선
+                            logger.error(f"Unexpected error in enhanced_receive: {e}")
+                            logger.error(f"Error type: {type(e).__name__}")
                             raise
                     
                     # Replace the receive method with our enhanced version
                     read_stream.receive = enhanced_receive
+                    
+                    # 추가 보호 레이어: write_stream 래핑
+                    original_send = write_stream.send
+                    
+                    async def enhanced_send(data):
+                        try:
+                            logger.debug(f"Sending message: {data}")
+                            return await original_send(data)
+                        except Exception as e:
+                            logger.error(f"Error sending message: {e}")
+                            # 전송 오류는 다시 발생시킵니다 - 이것은 연결 문제를 나타낼 수 있음
+                            raise
+                    
+                    # write_stream.send를 향상된 버전으로 교체
+                    write_stream.send = enhanced_send
                     
                     await mcp_server.run(
                         read_stream,

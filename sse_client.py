@@ -3,7 +3,10 @@
 import logging
 import asyncio
 import json
-from typing import Any, Dict, Optional, Set
+import re
+import time
+import traceback
+from typing import Any, Dict, Optional, Set, Union, List
 
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
@@ -57,18 +60,59 @@ class CapabilityAwareClientSession(ClientSession):
                 try:
                     result = await self.read_stream.original_read()
                     logger.debug(f"Received response: {result}")
+
+                    # 추가 검증: result가 유효한 dict인지 확인
+                    if not isinstance(result, dict):
+                        logger.error(f"Invalid response format (not a dict): {type(result)}")
+                        error_msg = f"Invalid response format: {type(result).__name__}, expected dict"
+                        return {
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32700,
+                                "message": error_msg
+                            },
+                            "id": self._request_id
+                        }
+                    
+                    # 추가 검증: 필수 필드가 있는지 확인
+                    if "jsonrpc" not in result:
+                        logger.warning(f"Response missing 'jsonrpc' field: {result}")
+                        # 여전히 응답을 처리할 수 있으므로 경고만 기록
+                    
                     return result
+                except json.JSONDecodeError as je:
+                    error_message = str(je)
+                    logger.error(f"JSON decode error in read_stream.read(): {je}")
+                    logger.error(f"Error position: {je.pos}, line {je.lineno}, column {je.colno}")
+                    logger.error(f"Document context: '{je.doc[max(0, je.pos-10):je.pos+10]}'")
+                    
+                    # 상세한 오류 정보를 포함한 응답 반환
+                    return {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32700,
+                            "message": f"JSON parsing error at position {je.pos}: {error_message}"
+                        },
+                        "id": self._request_id
+                    }
                 except Exception as e:
                     error_message = str(e)
+                    logger.error(f"Error in read_stream.read(): {e}")
+                    
                     if "Unexpected non-whitespace character" in error_message or "JSON" in error_message:
                         logger.error(f"JSON parsing error in read_stream.read(): {e}")
                         logger.error(f"Error context: {e.__class__.__name__}, Location: {getattr(e, 'pos', 'Unknown')}")
+                        
+                        # 오류 메시지에서 위치 정보 추출 시도
+                        position_match = re.search(r'at position (\d+)', error_message)
+                        position = position_match.group(1) if position_match else "unknown"
+                        
                         # Return an error object instead of failing
                         return {
                             "jsonrpc": "2.0",
                             "error": {
                                 "code": -32700,
-                                "message": f"JSON parsing error: {error_message}"
+                                "message": f"JSON parsing error at position {position}: {error_message}"
                             },
                             "id": self._request_id
                         }

@@ -5,6 +5,9 @@ This server is created independent of any transport mechanism.
 
 import typing as t
 import logging
+import json
+import re
+import traceback
 from mcp import server, types
 from mcp.client.session import ClientSession
 
@@ -53,18 +56,44 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                     error_message = str(e)
                     logger.error(f"Error in handler: {e}")
                     
-                    # Enhanced JSON parsing error detection and handling
+                    # Enhanced JSON parsing error detection and detailed logging
                     if ("Unexpected non-whitespace character" in error_message or 
                         "JSON" in error_message or 
                         "SyntaxError" in error_message):
-                        logger.error(f"JSON parsing error details: {e.__class__.__name__}, Message: {error_message}")
                         
-                        # Try to extract position information if available
+                        # 상세한 오류 정보 로깅
+                        logger.error(f"JSON parsing error details: {e.__class__.__name__}")
+                        logger.error(f"Error message: {error_message}")
+                        
+                        # 스택 트레이스 로깅
+                        tb_str = ''.join(traceback.format_tb(e.__traceback__))
+                        logger.error(f"Stack trace:\n{tb_str}")
+                        
+                        # 직렬화 도중 예외가 발생한 경우 원본 데이터 로깅 시도
+                        if hasattr(e, 'doc'):
+                            # JSONDecodeError인 경우
+                            pos = getattr(e, 'pos', 0)
+                            context_start = max(0, pos - 20)
+                            context_end = min(len(e.doc), pos + 20)
+                            logger.error(f"JSON document context around position {pos}: '{e.doc[context_start:context_end]}'")
+                            
+                            # 오류 위치 표시
+                            pos_marker = ' ' * (min(20, pos) - context_start) + '^'
+                            logger.error(f"Error position: {pos_marker}")
+                        
+                        # 위치 정보 추출
                         pos_info = ""
                         if hasattr(e, 'pos'):
                             pos_info = f" at position {e.pos}"
+                            if hasattr(e, 'lineno') and hasattr(e, 'colno'):
+                                pos_info += f" (line {e.lineno}, column {e.colno})"
                         elif hasattr(e, 'doc') and hasattr(e, 'pos'):
-                            pos_info = f" at position {e.pos} in document"
+                            pos_info = f" at position {e.pos}"
+                        else:
+                            # 오류 메시지에서 위치 정보 추출 시도
+                            pos_match = re.search(r'at position (\d+)', error_message)
+                            if pos_match:
+                                pos_info = f" at position {pos_match.group(1)}"
                         
                         # Return a proper error response for JSON parsing errors
                         return types.ServerResult(
