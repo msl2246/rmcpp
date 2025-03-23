@@ -78,9 +78,21 @@ class CapabilityAwareClientSession(ClientSession):
         
         for attempt in range(self.max_retries + 1):
             try:
+                # Check if _send_request exists in parent class
+                if not hasattr(super(), '_send_request'):
+                    logger.error(f"'_send_request' method not found in parent class for method: {method_name}")
+                    return ErrorResponse(code=0, message="'super' object has no attribute '_send_request'")
+                
+                # Call the parent method
                 return await super()._send_request(method_name, *args, **kwargs)
             except Exception as e:
                 error_message = str(e)
+                
+                # Log detailed error information for JSON parsing errors
+                if "Unexpected non-whitespace character" in error_message or "SyntaxError" in error_message:
+                    logger.error(f"JSON parsing error in {method_name}: {error_message}")
+                    # Return a proper error response instead of retrying
+                    return ErrorResponse(code=-32700, message=f"JSON parsing error: {error_message}")
                 
                 # Method not found error detection
                 if "Method not found" in error_message or "-32601" in error_message:

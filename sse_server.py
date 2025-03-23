@@ -48,6 +48,32 @@ def create_starlette_app(
             ) as (read_stream, write_stream):
                 try:
                     logger.debug("Starting MCP server run")
+                    
+                    # Enhance read_stream to better handle malformed JSON
+                    original_receive = read_stream.receive
+                    
+                    async def enhanced_receive():
+                        try:
+                            message = await original_receive()
+                            logger.debug(f"Received message: {message}")
+                            return message
+                        except Exception as e:
+                            if "Unexpected non-whitespace character" in str(e) or "JSON" in str(e):
+                                logger.error(f"JSON parsing error in received message: {e}")
+                                # Return an error notification instead of failing
+                                return {
+                                    "jsonrpc": "2.0",
+                                    "error": {
+                                        "code": -32700,
+                                        "message": f"JSON parsing error: {str(e)}"
+                                    },
+                                    "id": None
+                                }
+                            raise
+                    
+                    # Replace the receive method with our enhanced version
+                    read_stream.receive = enhanced_receive
+                    
                     await mcp_server.run(
                         read_stream,
                         write_stream,

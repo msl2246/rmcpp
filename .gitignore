@@ -1,5 +1,6 @@
 # Ignore mcp_server_fetch
 mcp_server_fetch/
+mcp_server_time/
 
 # Ignore Python virtual environment
 venv/

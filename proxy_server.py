@@ -44,6 +44,23 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
 
         app = server.Server(server_name)
 
+        # Enhanced error handler wrapper for request handlers
+        def create_error_handler(handler_fn):
+            async def wrapped_handler(req):
+                try:
+                    return await handler_fn(req)
+                except Exception as e:
+                    logger.error(f"Error in handler: {e}")
+                    if "Unexpected non-whitespace character" in str(e) or "JSON" in str(e):
+                        logger.error(f"JSON parsing error: {e}")
+                        # Return a proper error response for JSON parsing errors
+                        return types.ServerResult(
+                            types.ErrorResponse(code=-32700, message=f"JSON parsing error: {str(e)}")
+                        )
+                    # Re-raise all other exceptions
+                    raise
+            return wrapped_handler
+
         # prompts capabilities handling
         if get_capability(capabilities, 'prompts'):
             logger.info(f"Server {server_name} supports prompts")
@@ -56,7 +73,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                     logger.error(f"Error in list_prompts: {e}")
                     raise
 
-            app.request_handlers[types.ListPromptsRequest] = _list_prompts
+            app.request_handlers[types.ListPromptsRequest] = create_error_handler(_list_prompts)
 
             async def _get_prompt(req: types.GetPromptRequest) -> types.ServerResult:
                 try:
@@ -66,7 +83,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                     logger.error(f"Error in get_prompt with {req.params.name}: {e}")
                     raise
 
-            app.request_handlers[types.GetPromptRequest] = _get_prompt
+            app.request_handlers[types.GetPromptRequest] = create_error_handler(_get_prompt)
         else:
             logger.info(f"Server {server_name} does not support prompts")
 
@@ -82,7 +99,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                     logger.error(f"Error in list_resources: {e}")
                     raise
 
-            app.request_handlers[types.ListResourcesRequest] = _list_resources
+            app.request_handlers[types.ListResourcesRequest] = create_error_handler(_list_resources)
 
             # register read_resource handler
             async def _read_resource(req: types.ReadResourceRequest) -> types.ServerResult:
@@ -93,7 +110,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                     logger.error(f"Error in read_resource with {req.params.uri}: {e}")
                     raise
 
-            app.request_handlers[types.ReadResourceRequest] = _read_resource
+            app.request_handlers[types.ReadResourceRequest] = create_error_handler(_read_resource)
 
             # register only if subscription feature is supported
             if get_capability(capabilities, 'resources.subscribe'):
@@ -107,7 +124,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                         logger.error(f"Error in subscribe_resource with {req.params.uri}: {e}")
                         raise
 
-                app.request_handlers[types.SubscribeRequest] = _subscribe_resource
+                app.request_handlers[types.SubscribeRequest] = create_error_handler(_subscribe_resource)
 
                 async def _unsubscribe_resource(req: types.UnsubscribeRequest) -> types.ServerResult:
                     try:
@@ -117,7 +134,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                         logger.error(f"Error in unsubscribe_resource with {req.params.uri}: {e}")
                         raise
 
-                app.request_handlers[types.UnsubscribeRequest] = _unsubscribe_resource
+                app.request_handlers[types.UnsubscribeRequest] = create_error_handler(_unsubscribe_resource)
         else:
             logger.info(f"Server {server_name} does not support resources")
 
@@ -133,7 +150,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                     logger.error(f"Error in set_logging_level with {req.params.level}: {e}")
                     raise
 
-            app.request_handlers[types.SetLevelRequest] = _set_logging_level
+            app.request_handlers[types.SetLevelRequest] = create_error_handler(_set_logging_level)
         else:
             logger.info(f"Server {server_name} does not support logging")
 
@@ -149,7 +166,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                     logger.error(f"Error in list_tools: {e}")
                     raise
 
-            app.request_handlers[types.ListToolsRequest] = _list_tools
+            app.request_handlers[types.ListToolsRequest] = create_error_handler(_list_tools)
 
             async def _call_tool(req: types.CallToolRequest) -> types.ServerResult:
                 try:
@@ -167,7 +184,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                         ),
                     )
 
-            app.request_handlers[types.CallToolRequest] = _call_tool
+            app.request_handlers[types.CallToolRequest] = create_error_handler(_call_tool)
         else:
             logger.info(f"Server {server_name} does not support tools")
 
@@ -198,7 +215,7 @@ async def create_proxy_server(remote_app: ClientSession) -> server.Server:  # no
                 logger.error(f"Error in complete: {e}")
                 raise
 
-        app.request_handlers[types.CompleteRequest] = _complete
+        app.request_handlers[types.CompleteRequest] = create_error_handler(_complete)
 
         logger.info(f"Proxy server for {server_name} created successfully")
         return app
