@@ -35,6 +35,21 @@ class CapabilityAwareClientSession(ClientSession):
         self.unsupported_methods: Set[str] = set()
         self.max_retries: int = 1
         self.disable_capability_check: bool = False
+        self._request_id: int = 0
+        
+        # Store read and write streams for direct access
+        if len(args) >= 2:
+            self.read_stream = args[0]
+            self.write_stream = args[1]
+    
+    def _next_request_id(self) -> int:
+        """Generate the next request ID.
+        
+        Returns:
+            Incremented request ID
+        """
+        self._request_id += 1
+        return self._request_id
     
     async def initialize(self):
         """Initialize connection and store server capabilities."""
@@ -70,6 +85,51 @@ class CapabilityAwareClientSession(ClientSession):
         # Try by default
         return True
     
+    async def _send_request(self, method_name: str, *args, **kwargs):
+        """Send a request to the MCP server.
+        
+        This implementation is added to prevent dependency on the parent class's method
+        which might not exist in the current version of the MCP SDK being used.
+        
+        Args:
+            method_name: The method name to call
+            *args: Positional arguments to pass to the method
+            **kwargs: Keyword arguments to pass to the method
+            
+        Returns:
+            The method response
+        """
+        try:
+            # Direct implementation to send RPC request
+            # Get the read and write streams from the class
+            read_stream = self.read_stream
+            write_stream = self.write_stream
+            
+            # Prepare request data
+            request_data = {
+                "jsonrpc": "2.0",
+                "id": self._next_request_id(),  # Assuming this method exists in parent
+                "method": method_name,
+                "params": args if args else kwargs
+            }
+            
+            # Send request
+            await write_stream.write(request_data)
+            
+            # Wait for response
+            response = await read_stream.read()
+            
+            # Handle response
+            if "error" in response:
+                error = response["error"]
+                logger.error(f"RPC error: {error}")
+                return ErrorResponse(code=error.get("code", 0), message=error.get("message", "Unknown error"))
+            
+            return response.get("result")
+        except Exception as e:
+            logger.error(f"Error sending request: {e}")
+            raise
+    
     async def _send_request_with_retry(self, method_name: str, *args, **kwargs):
         """Check if method is supported, send request and retry if needed."""
         if not self._is_method_supported(method_name):
@@ -78,13 +138,8 @@ class CapabilityAwareClientSession(ClientSession):
         
         for attempt in range(self.max_retries + 1):
             try:
-                # Check if _send_request exists in parent class
-                if not hasattr(super(), '_send_request'):
-                    logger.error(f"'_send_request' method not found in parent class for method: {method_name}")
-                    return ErrorResponse(code=0, message="'super' object has no attribute '_send_request'")
-                
-                # Call the parent method
-                return await super()._send_request(method_name, *args, **kwargs)
+                # Use our own _send_request implementation instead of parent's
+                return await self._send_request(method_name, *args, **kwargs)
             except Exception as e:
                 error_message = str(e)
                 
